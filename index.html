@@ -419,7 +419,7 @@
  
   var sys12 = true;
   try { sys12 = !!new Intl.DateTimeFormat(undefined, { hour: 'numeric' }).resolvedOptions().hour12; } catch (e) {}
-  var state = { fmt: sys12 ? '12' : '24', theme: 'auto', secs: 'on', awake: 'off' };
+  var state = { fmt: sys12 ? '12' : '24', theme: 'auto', secs: 'on', awake: 'on' };
   var allowed = { fmt: ['12', '24'], theme: ['auto', 'light', 'dark'], secs: ['on', 'off'], awake: ['on', 'off'] };
   try {
     var raw = localStorage.getItem(KEY);
@@ -572,15 +572,28 @@
   }
  
   var lock = null;
-  function setAwake(on) {
+  var retryArmed = false;
+  function armRetry() {
+    if (retryArmed) return;
+    retryArmed = true;
+    var go = function () {
+      document.removeEventListener('pointerdown', go, true);
+      document.removeEventListener('keydown', go, true);
+      retryArmed = false;
+      if (state.awake === 'on' && !lock) setAwake(true, false);
+    };
+    document.addEventListener('pointerdown', go, true);
+    document.addEventListener('keydown', go, true);
+  }
+  function setAwake(on, auto) {
     if (!on) {
       if (lock) { try { lock.release(); } catch (e) {} }
       lock = null;
       return;
     }
     if (!('wakeLock' in navigator)) {
-      state.awake = 'off'; save(); sync();
-      say('Keeping the screen on is not supported in this browser.');
+      if (!auto) { state.awake = 'off'; save(); sync(); }
+      say('Keeping the screen on is not supported in this browser. Turn off auto-lock in your phone settings instead.');
       return;
     }
     navigator.wakeLock.request('screen').then(function (l) {
@@ -588,6 +601,7 @@
       l.addEventListener('release', function () { if (lock === l) lock = null; });
       say('');
     }).catch(function () {
+      if (auto) { armRetry(); return; }   // some browsers need a tap first; try again on the first touch
       state.awake = 'off'; save(); sync();
       say('Could not keep the screen on here. Your device or view may not allow it.');
     });
@@ -600,7 +614,7 @@
     state[g] = b.dataset.val;
     save();
     if (g === 'theme') applyTheme();
-    if (g === 'awake') { say(''); setAwake(state.awake === 'on'); }
+    if (g === 'awake') { say(''); setAwake(state.awake === 'on', false); }
     sync();
     render(new Date(), true);
   });
@@ -625,7 +639,7 @@
       clearTimeout(timer);
       render(new Date(), false);
       timer = setTimeout(tick, 1000 - (Date.now() % 1000) + 3);
-      if (state.awake === 'on' && !lock) setAwake(true);
+      if (state.awake === 'on' && !lock) setAwake(true, true);
     }
   });
  
@@ -634,7 +648,7 @@
   sync();
   render(new Date(), false);
   timer = setTimeout(tick, 1000 - (Date.now() % 1000) + 3);
-  if (state.awake === 'on') setAwake(true);
+  if (state.awake === 'on') setAwake(true, true);
 })();
 </script>
  
