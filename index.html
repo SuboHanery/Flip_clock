@@ -1,0 +1,612 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}[hidden]{display:none!important}</style>
+<title>Flip Clock</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@800&family=Instrument+Sans:wght@400;500;600&display=swap">
+<style>
+  /* Layout: date and time zone on a top line, one large flip clock centred in the page, 12/24h + theme + seconds controls along the bottom.
+     Wide screens: hours:minutes with a smaller seconds group at the right. Phones in portrait: seconds drop to a row below. */
+  :root {
+    --bg: #e4e8ed;
+    --fg: #1b2026;
+    --muted: #596470;
+    --card-top: #fafbfc;
+    --card-bot: #eef1f4;
+    --digit: #1b2026;
+    --shadow: rgba(20, 30, 45, 0.2);
+    --surface: #f1f3f6;
+    --line: #c5ccd5;
+    --accent: #c2410c;
+    --accent-fg: #ffffff;
+    --digits: "Big Shoulders Display", "Barlow Condensed", "Arial Narrow", Impact, sans-serif;
+    --ui: "Instrument Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1114;
+      --fg: #e8ebef;
+      --muted: #9aa4b0;
+      --card-top: #24282e;
+      --card-bot: #1b1e23;
+      --digit: #eef1f4;
+      --shadow: rgba(0, 0, 0, 0.6);
+      --surface: #171a1e;
+      --line: #2c3138;
+      --accent: #ff8a4c;
+      --accent-fg: #1a0c03;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1114;
+    --fg: #e8ebef;
+    --muted: #9aa4b0;
+    --card-top: #24282e;
+    --card-bot: #1b1e23;
+    --digit: #eef1f4;
+    --shadow: rgba(0, 0, 0, 0.6);
+    --surface: #171a1e;
+    --line: #2c3138;
+    --accent: #ff8a4c;
+    --accent-fg: #1a0c03;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--ui);
+    font-size: 16px;
+    padding-block: 1rem 1.25rem;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    transition: background-color 0.25s ease, color 0.25s ease;
+  }
+
+  header {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 0.25rem 1.5rem;
+  }
+  #tz { font-size: 0.8125rem; color: var(--muted); letter-spacing: 0.04em; }
+  .sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  main {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1.75rem;
+  }
+
+  /* ---------- flip clock ---------- */
+  .face {
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    gap: 0.14em;
+    font-size: min(15vw, 32vh);
+    max-width: 100%;
+  }
+  .grp { display: flex; align-items: center; gap: 0.05em; }
+  .sec { font-size: 0.55em; }
+  .pair { display: flex; gap: 0.045em; }
+
+  .card {
+    position: relative;
+    width: 0.6em;
+    height: 1em;
+    perspective: 3.5em;
+    border-radius: 0.09em;
+    box-shadow: 0 0.03em 0.09em var(--shadow);
+  }
+  .half {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 50%;
+    overflow: hidden;
+  }
+  .top, .ft { top: 0; background: var(--card-top); border-radius: 0.09em 0.09em 0 0; }
+  .bottom, .fb { bottom: 0; background: var(--card-bot); border-radius: 0 0 0.09em 0.09em; }
+  .top, .bottom { z-index: 1; }
+  .flap { z-index: 2; visibility: hidden; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+  .ft { transform-origin: 50% 100%; }
+  .fb { transform-origin: 50% 0; }
+
+  .v {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 200%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--digits);
+    font-weight: 800;
+    font-size: 0.95em;
+    color: var(--digit);
+  }
+  .top .v, .ft .v { top: 0; }
+  .bottom .v, .fb .v { bottom: 0; }
+  .v b {
+    display: block;
+    font-weight: inherit;
+    line-height: 1;
+    text-box: trim-both cap alphabetic;
+  }
+
+  /* hinge */
+  .card::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 0.022em;
+    min-height: 1.5px;
+    transform: translateY(-50%);
+    background: var(--bg);
+    z-index: 3;
+  }
+
+  @keyframes flip-top { from { transform: rotateX(0deg); } to { transform: rotateX(-90deg); } }
+  @keyframes flip-bottom { from { transform: rotateX(90deg); } to { transform: rotateX(0deg); } }
+  .card.flip .ft { visibility: visible; animation: flip-top 0.3s ease-in forwards; }
+  .card.flip .fb { visibility: visible; transform: rotateX(90deg); animation: flip-bottom 0.3s 0.3s ease-out forwards; }
+
+  .colon {
+    width: 0.3em;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.16em;
+  }
+  .colon i {
+    display: block;
+    width: 0.075em;
+    height: 0.075em;
+    border-radius: 50%;
+    background: var(--fg);
+    animation: pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+
+  .ampm { display: flex; gap: 0.5rem; }
+  .ampm.off { visibility: hidden; }
+  .chip {
+    padding: 0.3rem 0.8rem;
+    border: 1px solid var(--line);
+    border-radius: 0.4rem;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    color: var(--muted);
+    background: var(--surface);
+  }
+  .chip.on { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+
+  /* ---------- calendar cards ---------- */
+  .dates {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: flex-end;
+    gap: 1rem 0.4em;
+    font-size: min(6vw, 12vh);
+    max-width: 100%;
+  }
+  .dg { display: flex; flex-direction: column; align-items: center; gap: 0.6rem; }
+  .cap {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .dcards { display: flex; gap: 0.045em; }
+  .card.wide { width: 1.45em; }
+  .card.wide .v { letter-spacing: 0.03em; }
+  .accent .v { color: var(--accent); }
+
+  .year { display: flex; flex-direction: column; align-items: center; gap: 0.6rem; width: min(100%, 28rem); }
+  .bar { width: 100%; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 0; border-radius: 3px; background: var(--accent); transition: width 0.6s ease; }
+  .year p { margin: 0; font-size: 0.8125rem; color: var(--muted); letter-spacing: 0.04em; text-align: center; }
+
+  /* ---------- controls ---------- */
+  footer { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; }
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 1rem 1.5rem;
+  }
+  .ctl { display: flex; flex-direction: column; gap: 0.35rem; align-items: flex-start; min-width: 0; }
+  .ctl > span {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .seg {
+    display: inline-flex;
+    gap: 2px;
+    padding: 3px;
+    border: 1px solid var(--line);
+    border-radius: 0.6rem;
+    background: var(--surface);
+  }
+  .seg button, .solo {
+    font: inherit;
+    font-size: 0.875rem;
+    font-weight: 500;
+    min-height: 40px;
+    min-width: 48px;
+    padding: 0 0.85rem;
+    border: 0;
+    border-radius: 0.4rem;
+    background: transparent;
+    color: var(--fg);
+    cursor: pointer;
+  }
+  .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); }
+  .seg button:not([aria-pressed="true"]):hover, .solo:hover { background: var(--line); }
+  .solo { border: 1px solid var(--line); background: var(--surface); border-radius: 0.6rem; min-height: 48px; }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .note { margin: 0; min-height: 1.1em; font-size: 0.8125rem; color: var(--muted); text-align: center; }
+
+  /* phones in portrait */
+  @media (max-width: 720px) {
+    .face { flex-direction: column; align-items: center; gap: 0.2em; font-size: min(27vw, 24vh); }
+    .sec { font-size: 0.45em; }
+    .sec .lead { display: none; }
+    .dates { font-size: min(12vw, 7vh); }
+    header { flex-direction: column; align-items: flex-start; }
+    .ctl { align-items: center; }
+    .controls { gap: 0.9rem 1rem; }
+  }
+
+  /* short landscape screens */
+  @media (max-height: 520px) and (min-width: 721px) {
+    .face { font-size: min(15vw, 26vh); }
+    .dates { font-size: min(6vw, 9vh); }
+    main { gap: 1rem; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .colon i { animation: none; }
+    .bar i { transition: none; }
+    body { transition: none; }
+  }
+</style>
+
+<header>
+  <div id="tz">&nbsp;</div>
+</header>
+
+<main>
+  <div class="face" id="face" aria-hidden="true">
+    <div class="grp hm">
+      <div class="pair"></div>
+      <div class="colon"><i></i><i></i></div>
+      <div class="pair"></div>
+    </div>
+    <div class="grp sec" id="sec">
+      <div class="colon lead"><i></i><i></i></div>
+      <div class="pair"></div>
+    </div>
+  </div>
+  <div class="ampm" id="ampm" aria-live="polite">
+    <span class="chip" id="chip-am">AM</span>
+    <span class="chip" id="chip-pm">PM</span>
+  </div>
+
+  <section class="dates" id="dates" aria-hidden="true">
+    <div class="dg"><span class="cap">Weekday</span><div class="dcards accent" data-kind="wd"></div></div>
+    <div class="dg"><span class="cap">Date</span><div class="dcards" data-kind="day"></div></div>
+    <div class="dg"><span class="cap">Month</span><div class="dcards accent" data-kind="mon"></div></div>
+    <div class="dg"><span class="cap">Year</span><div class="dcards" data-kind="yr"></div></div>
+  </section>
+
+  <div class="year">
+    <div class="bar"><i id="bar"></i></div>
+    <p id="yinfo">&nbsp;</p>
+  </div>
+  <p class="sr" id="sr"></p>
+</main>
+
+<footer>
+  <div class="controls">
+    <div class="ctl">
+      <span id="l-fmt">Format</span>
+      <div class="seg" role="group" aria-labelledby="l-fmt">
+        <button type="button" data-group="fmt" data-val="12">12 hr</button>
+        <button type="button" data-group="fmt" data-val="24">24 hr</button>
+      </div>
+    </div>
+    <div class="ctl">
+      <span id="l-theme">Theme</span>
+      <div class="seg" role="group" aria-labelledby="l-theme">
+        <button type="button" data-group="theme" data-val="auto">Auto</button>
+        <button type="button" data-group="theme" data-val="light">Light</button>
+        <button type="button" data-group="theme" data-val="dark">Dark</button>
+      </div>
+    </div>
+    <div class="ctl">
+      <span id="l-secs">Seconds</span>
+      <div class="seg" role="group" aria-labelledby="l-secs">
+        <button type="button" data-group="secs" data-val="on">On</button>
+        <button type="button" data-group="secs" data-val="off">Off</button>
+      </div>
+    </div>
+    <div class="ctl">
+      <span id="l-awake">Keep screen on</span>
+      <div class="seg" role="group" aria-labelledby="l-awake">
+        <button type="button" data-group="awake" data-val="on">On</button>
+        <button type="button" data-group="awake" data-val="off">Off</button>
+      </div>
+    </div>
+    <div class="ctl" id="fs-wrap" hidden>
+      <span>&nbsp;</span>
+      <button type="button" class="solo" id="fs">Full screen</button>
+    </div>
+  </div>
+  <p class="note" id="note" role="status"></p>
+</footer>
+
+<script>
+(function () {
+  var $ = function (s, r) { return (r || document).querySelector(s); };
+  var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+  var KEY = 'flip-clock-prefs';
+  var root = document.documentElement;
+  var rm = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+  var sys12 = true;
+  try { sys12 = !!new Intl.DateTimeFormat(undefined, { hour: 'numeric' }).resolvedOptions().hour12; } catch (e) {}
+  var state = { fmt: sys12 ? '12' : '24', theme: 'auto', secs: 'on', awake: 'off' };
+  var allowed = { fmt: ['12', '24'], theme: ['auto', 'light', 'dark'], secs: ['on', 'off'], awake: ['on', 'off'] };
+  try {
+    var raw = localStorage.getItem(KEY);
+    if (raw) {
+      var p = JSON.parse(raw);
+      Object.keys(allowed).forEach(function (k) {
+        if (p && allowed[k].indexOf(p[k]) > -1) state[k] = p[k];
+      });
+    }
+  } catch (e) {}
+  function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }
+
+  /* ---- build the six flip cards ---- */
+  var cards = [];
+  var cardHTML =
+    '<div class="half top"><span class="v"><b></b></span></div>' +
+    '<div class="half bottom"><span class="v"><b></b></span></div>' +
+    '<div class="half flap ft"><span class="v"><b></b></span></div>' +
+    '<div class="half flap fb"><span class="v"><b></b></span></div>';
+  function makeCard(parent, wide) {
+    var c = document.createElement('div');
+    c.className = 'card' + (wide ? ' wide' : '');
+    c.dataset.v = '';
+    c.innerHTML = cardHTML;
+    parent.appendChild(c);
+    return c;
+  }
+  $$('.pair').forEach(function (pair) {
+    for (var i = 0; i < 2; i++) cards.push(makeCard(pair, false));
+  });
+  var dc = {};
+  var counts = { wd: 1, day: 2, mon: 1, yr: 4 };
+  $$('.dcards').forEach(function (box) {
+    var k = box.dataset.kind;
+    dc[k] = [];
+    for (var i = 0; i < counts[k]; i++) dc[k].push(makeCard(box, k === 'wd' || k === 'mon'));
+  });
+
+  function put(card, cls, v) { card.querySelector('.' + cls + ' b').textContent = v; }
+
+  function setDigit(card, v, animate) {
+    var cur = card.dataset.v;
+    if (cur === v) return;
+    clearTimeout(card._t);
+    card.classList.remove('flip');
+    card.dataset.v = v;
+    if (!animate || rm.matches || cur === '') {
+      ['top', 'bottom', 'ft', 'fb'].forEach(function (k) { put(card, k, v); });
+      return;
+    }
+    put(card, 'top', v);
+    put(card, 'ft', cur);
+    put(card, 'fb', v);
+    put(card, 'bottom', cur);
+    void card.offsetWidth;
+    card.classList.add('flip');
+    card._t = setTimeout(function () {
+      put(card, 'bottom', v);
+      put(card, 'ft', v);
+      card.classList.remove('flip');
+    }, 620);
+  }
+
+  /* ---- render ---- */
+  var tzEl = $('#tz'), ampmEl = $('#ampm');
+  var chipAm = $('#chip-am'), chipPm = $('#chip-pm');
+  var barEl = $('#bar'), yinfo = $('#yinfo'), srEl = $('#sr');
+  var lastDate = '', lastTz = '';
+  function pad(n) { return (n < 10 ? '0' : '') + n; }
+
+  var WD = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+  var WDL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  var MO = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+  var MOL = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+  function isoWeek(y, mo, d) {
+    var t = new Date(Date.UTC(y, mo, d));
+    var dn = t.getUTCDay() || 7;
+    t.setUTCDate(t.getUTCDate() + 4 - dn);
+    var ys = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
+    return Math.ceil(((t - ys) / 864e5 + 1) / 7);
+  }
+
+  function renderDate(now, animate) {
+    var y = now.getFullYear(), mo = now.getMonth(), d = now.getDate();
+    setDigit(dc.wd[0], WD[now.getDay()], animate);
+    var ds = pad(d);
+    setDigit(dc.day[0], ds.charAt(0), animate);
+    setDigit(dc.day[1], ds.charAt(1), animate);
+    setDigit(dc.mon[0], MO[mo], animate);
+    var ys = String(y);
+    for (var i = 0; i < 4; i++) setDigit(dc.yr[i], ys.charAt(i) || '0', animate);
+
+    var doy = Math.round((Date.UTC(y, mo, d) - Date.UTC(y, 0, 1)) / 864e5) + 1;
+    var total = ((y % 4 === 0 && y % 100 !== 0) || y % 400 === 0) ? 366 : 365;
+    var left = total - doy;
+    barEl.style.width = (doy / total * 100).toFixed(1) + '%';
+    var leftTxt = left === 0 ? 'last day of ' + y : left + (left === 1 ? ' day' : ' days') + ' left in ' + y;
+    yinfo.textContent = 'Day ' + doy + ' of ' + total + ' · ' + leftTxt + ' · Week ' + isoWeek(y, mo, d);
+    srEl.textContent = WDL[now.getDay()] + ', ' + d + ' ' + MOL[mo] + ' ' + y;
+  }
+
+  function render(now, animate) {
+    var h = now.getHours(), m = now.getMinutes(), s = now.getSeconds();
+    var pm = h >= 12;
+    if (state.fmt === '12') h = h % 12 || 12;
+    var str = pad(h) + pad(m) + pad(s);
+    for (var i = 0; i < 6; i++) setDigit(cards[i], str.charAt(i), animate);
+
+    ampmEl.classList.toggle('off', state.fmt !== '12');
+    chipAm.classList.toggle('on', state.fmt === '12' && !pm);
+    chipPm.classList.toggle('on', state.fmt === '12' && pm);
+
+    var key = now.getFullYear() + '-' + now.getMonth() + '-' + now.getDate();
+    if (key !== lastDate) {
+      var firstRun = lastDate === '';
+      lastDate = key;
+      renderDate(now, animate && !firstRun);
+    }
+
+    var off = -now.getTimezoneOffset();
+    var sign = off >= 0 ? '+' : '-';
+    off = Math.abs(off);
+    var name = '';
+    try { name = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) {}
+    var tz = (name ? name.replace(/_/g, ' ') + ' · ' : '') + 'UTC' + sign + pad(Math.floor(off / 60)) + ':' + pad(off % 60);
+    if (tz !== lastTz) { tzEl.textContent = tz; lastTz = tz; }
+  }
+
+  var timer = null;
+  function tick() {
+    render(new Date(), true);
+    timer = setTimeout(tick, 1000 - (Date.now() % 1000) + 3);
+  }
+
+  /* ---- controls ---- */
+  var note = $('#note');
+  function say(msg) { note.textContent = msg || ''; }
+
+  function applyTheme() {
+    if (state.theme === 'auto') root.removeAttribute('data-theme');
+    else root.setAttribute('data-theme', state.theme);
+  }
+
+  function sync() {
+    $$('button[data-group]').forEach(function (b) {
+      b.setAttribute('aria-pressed', String(state[b.dataset.group] === b.dataset.val));
+    });
+    $('#sec').hidden = state.secs === 'off';
+  }
+
+  var lock = null;
+  function setAwake(on) {
+    if (!on) {
+      if (lock) { try { lock.release(); } catch (e) {} }
+      lock = null;
+      return;
+    }
+    if (!('wakeLock' in navigator)) {
+      state.awake = 'off'; save(); sync();
+      say('Keeping the screen on is not supported in this browser.');
+      return;
+    }
+    navigator.wakeLock.request('screen').then(function (l) {
+      lock = l;
+      l.addEventListener('release', function () { if (lock === l) lock = null; });
+      say('');
+    }).catch(function () {
+      state.awake = 'off'; save(); sync();
+      say('Could not keep the screen on here. Your device or view may not allow it.');
+    });
+  }
+
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest ? e.target.closest('button[data-group]') : null;
+    if (!b) return;
+    var g = b.dataset.group;
+    state[g] = b.dataset.val;
+    save();
+    if (g === 'theme') applyTheme();
+    if (g === 'awake') { say(''); setAwake(state.awake === 'on'); }
+    sync();
+    render(new Date(), true);
+  });
+
+  var fsBtn = $('#fs');
+  if (document.fullscreenEnabled) {
+    $('#fs-wrap').hidden = false;
+    fsBtn.addEventListener('click', function () {
+      var p;
+      try {
+        p = document.fullscreenElement ? document.exitFullscreen() : root.requestFullscreen();
+      } catch (e) { p = Promise.reject(e); }
+      if (p && p.catch) p.catch(function () { say('Full screen is not available in this view.'); });
+    });
+    document.addEventListener('fullscreenchange', function () {
+      fsBtn.textContent = document.fullscreenElement ? 'Exit full screen' : 'Full screen';
+    });
+  }
+
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') {
+      clearTimeout(timer);
+      render(new Date(), false);
+      timer = setTimeout(tick, 1000 - (Date.now() % 1000) + 3);
+      if (state.awake === 'on' && !lock) setAwake(true);
+    }
+  });
+
+  /* ---- start ---- */
+  if (state.theme !== 'auto') applyTheme();
+  sync();
+  render(new Date(), false);
+  timer = setTimeout(tick, 1000 - (Date.now() % 1000) + 3);
+  if (state.awake === 'on') setAwake(true);
+})();
+</script>
+
+</body>
+</html>
